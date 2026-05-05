@@ -781,17 +781,143 @@ SP.shimawaki = {
   ]
 };
 
+SP.bird = {
+  pal: {'y':'#f0e68c', 'Y':'#ffd700', 'w':'#ffffff', 'b':'#000000', 'o':'#ffa500'},
+  down: [
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '    yy      ',
+    '  oyyby     ',
+    '   yyyw     ',
+    '   yyyy     ',
+    '    bb      '
+  ],
+  up: [
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '    yy      ',
+    '  yyyy      ',
+    ' y yyb y    ',
+    '  yyyyw     ',
+    '   yy       ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            '
+  ]
+};
+SP.bird.left = SP.bird.down; SP.bird.right = SP.bird.down;
+
+SP.kitten = {
+  pal: {'w':'#ffffff', 'g':'#d3d3d3', 'b':'#000000', 'p':'#ffb6c1'},
+  down: [
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '   w    w   ',
+    '   w    w   ',
+    '  wwwwwwww  ',
+    '  wwbwwbww  ',
+    '  wwwwpwww  ',
+    '  wwwwwwww  ',
+    '  wwwwwwww  ',
+    '   w    w   '
+  ],
+  left: [
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '     w    w ',
+    '     wwwwww ',
+    '    wwwwwbw ',
+    '   gwwwwwww ',
+    '   wwwwwwpw ',
+    '   wwwwwwww ',
+    '   wwwwwwww ',
+    '    w    w  '
+  ],
+  right: [
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    ' w    w     ',
+    ' wwwwww     ',
+    ' wbwwwww    ',
+    ' wwwwwwwg   ',
+    ' wpwwwwww   ',
+    ' wwwwwwww   ',
+    ' wwwwwwww   ',
+    '  w    w    '
+  ],
+  up: [
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '            ',
+    '   w    w   ',
+    '   w    w   ',
+    '  wwwwwwww  ',
+    '  wwwwwwww  ',
+    '  wwwwwwww  ',
+    '  wwwwwwww  ',
+    '  wwwwwwww  ',
+    '   w    w   '
+  ]
+};
+
 // ===== CHARACTER DRAWING =====
 var dirNames=['down','left','right','up'];
 function drawChar(px, py, dir, frame, palette, sx, sy) {
   var x=px-sx, y=py-sy;
   if(x<-TILE||x>CANVAS_W||y<-TILE||y>CANVAS_H) return;
   var step = frame%2===1 ? (frame%4===1?-1:1) : 0;
-  // shadow
-  ctx.fillStyle='rgba(0,0,0,0.25)';
-  ctx.beginPath();
-  ctx.ellipse(x+16,y+31,12,4,0,0,Math.PI*2);
-  ctx.fill();
+  if(!palette.noShadow){
+    ctx.fillStyle='rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(x+16,y+31,12,4,0,0,Math.PI*2);
+    ctx.fill();
+  }
   var sp = SP[palette.id] || SP.player;
   var dn = dirNames[dir];
   var data = sp[dn] || sp.down;
@@ -804,6 +930,56 @@ function spawnNPCs() {
   if(currentMap==='indoor'){
     shopkeeper={x:6,y:1,px:6*TILE,py:1*TILE,dir:0,palette:makeShopkeeperPalette(),visible:true,id:'shopkeeper'};
     npcs.push(shopkeeper); shimawaki=null;
+    var kitten={x:4,y:5,px:4*TILE,py:5*TILE,dir:0,palette:{id:'kitten'},visible:true,id:'kitten',moving:false,moveFrame:0,moveTimer:0,talkCount:0};
+    npcs.push(kitten);
+  } else if(currentMap==='forest') {
+    var birdPos = [[14,8], [5,4], [11,15], [3,12], [16,3]];
+    for(var i=0; i<birdPos.length; i++){
+      npcs.push({x:birdPos[i][0],y:birdPos[i][1],px:birdPos[i][0]*TILE,py:birdPos[i][1]*TILE,dir:1,palette:{id:'bird',noShadow:true},visible:true,id:'bird',flying:false,flyTimer:0});
+    }
+  }
+}
+
+function updateNPCs() {
+  for(var i=0; i<npcs.length; i++){
+    var n = npcs[i];
+    if(!n.visible) continue;
+    if(n.id==='kitten' && gameState==='EXPLORE'){
+      if(!n.moving){
+        n.moveTimer++;
+        if(n.moveTimer>60){
+          n.moveTimer=0;
+          if(Math.random()<0.5){
+            var dir = Math.floor(Math.random()*4);
+            n.dir = dir;
+            var nx=n.x+DIR_DX[dir], ny=n.y+DIR_DY[dir];
+            if(!isSolid(nx,ny) && nx>=2 && nx<=9 && ny>=2 && ny<=7){
+               n.x=nx; n.y=ny; n.moving=true; n.moveFrame=0;
+            }
+          }
+        }
+      }else{
+        n.moveFrame++;
+        n.px+=DIR_DX[n.dir]*MOVE_SPD;
+        n.py+=DIR_DY[n.dir]*MOVE_SPD;
+        if(n.moveFrame>=MOVE_FRAMES){
+          n.moving=false; n.moveFrame=0; n.px=n.x*TILE; n.py=n.y*TILE;
+        }
+      }
+    }else if(n.id==='bird'){
+      if(!n.flying){
+        n.flyTimer++;
+        if(n.flyTimer%20===0) n.dir = Math.floor(Math.random()*2)?1:2;
+        if(Math.abs(n.x - player.x) + Math.abs(n.y - player.y) <= 2){
+          n.flying = true; n.flyTimer = 0; n.dir = 3;
+        }
+      }else{
+        n.flyTimer++;
+        n.py -= 3;
+        if(n.flyTimer%4<2) n.px -= 1; else n.px += 1;
+        if(n.flyTimer>60) n.visible = false;
+      }
+    }
   }
 }
 
@@ -869,11 +1045,20 @@ function interact(){
 
 // ===== STORY =====
 function triggerNPCTalk(npc){
-  if(npc.id!=='shopkeeper') return;
   if(player.y>npc.y) npc.dir=0;
   else if(player.y<npc.y) npc.dir=3;
   else if(player.x<npc.x) npc.dir=1;
   else npc.dir=2;
+  
+  if(npc.id==='kitten'){
+    var texts = ['にゃーん', 'にゃん？', 'ゴロゴロ……'];
+    showText('子猫', texts[npc.talkCount % 3], null);
+    npc.talkCount++;
+    return;
+  }
+  
+  if(npc.id!=='shopkeeper') return;
+
   if(storyPhase===0){
     showText('店員','ごめんねお兄さん、まだ営業して\nないんだよ。\nまた出直してきておくれ。',function(){storyPhase=1;});
   }else{ startMainDialogue(); }
@@ -963,7 +1148,8 @@ function exitHouse(){
   fadeDir=1; fadeColor='black';
   fadeCb=function(){
     currentMap='forest'; resetPlayer(9,8,0);
-    npcs.length=0; shopkeeper=null; shimawaki=null;
+    shopkeeper=null; shimawaki=null;
+    spawnNPCs();
     fadeDir=-1; fadeCb=null; fadeColor='black';
   };
 }
@@ -1088,6 +1274,7 @@ function update(){
   actionJustPressed=keys.action&&!prevAction; prevAction=keys.action;
   if(gameState==='EXPLORE'&&fadeDir===0){
     updatePlayer();
+    updateNPCs();
     if(actionJustPressed&&!player.moving) interact();
   } else if(gameState==='DIALOGUE'){
     dlgTimer++;
@@ -1124,6 +1311,7 @@ function gameLoop(){ update(); render(); requestAnimationFrame(gameLoop); }
 // ===== INIT =====
 ctx.imageSmoothingEnabled=false;
 resetPlayer(3,17,3);
+spawnNPCs();
 gameLoop();
 </script>
 </body>
