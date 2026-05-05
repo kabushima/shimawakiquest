@@ -78,7 +78,10 @@ var bgmNextUrl = '';
 var BGM_MAX_VOL = 0.5;
 
 function playBGM(url, slowFadeIn) {
-  if (currentBGMUrl === url && bgmState !== 'FADE_OUT') return;
+  if (currentBGMUrl === url && bgmState !== 'FADE_OUT') {
+    if (bgmAudio.paused) { var p = bgmAudio.play(); if (p) p.catch(function(e){}); }
+    return;
+  }
   if (!url) { bgmNextUrl = ''; bgmState = 'FADE_OUT'; return; }
   bgmNextUrl = url;
   if (currentBGMUrl && !bgmAudio.paused && bgmVol > 0) bgmState = 'FADE_OUT';
@@ -86,7 +89,7 @@ function playBGM(url, slowFadeIn) {
 }
 function stopBGM() { playBGM(''); }
 function _startBGM(url, slowFadeIn) {
-  bgmAudio.src = url; bgmAudio.volume = 0; bgmVol = 0;
+  bgmAudio.src = encodeURI(url); bgmAudio.volume = 0; bgmVol = 0;
   bgmState = slowFadeIn ? 'SLOW_FADE_IN' : 'FADE_IN';
   var p = bgmAudio.play();
   if (p) p.catch(function(e){});
@@ -113,7 +116,7 @@ function updateBGM() {
 function ensureAudio() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') audioCtx.resume();
-  if (!audioInitialized) {
+  if (!audioInitialized || (bgmAudio.paused && bgmState !== 'IDLE')) {
     audioInitialized = true;
     if (currentMap === 'forest') playBGM('BGM/森.mp3');
     else playBGM('BGM/カフェ.mp3');
@@ -217,6 +220,8 @@ document.addEventListener('keydown', function(e) {
   if (e.code==='ArrowRight'||e.code==='KeyD') { keys.right=true; e.preventDefault(); }
   if (e.code==='KeyZ'||e.code==='Enter'||e.code==='Space') { keys.action=true; e.preventDefault(); }
 });
+document.addEventListener('pointerdown', ensureAudio);
+document.addEventListener('click', ensureAudio);
 document.addEventListener('keyup', function(e) {
   if (e.code==='ArrowUp'||e.code==='KeyW') keys.up=false;
   if (e.code==='ArrowDown'||e.code==='KeyS') keys.down=false;
