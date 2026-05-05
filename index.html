@@ -75,7 +75,11 @@ var currentBGMUrl = '';
 var bgmVol = 0;
 var bgmState = 'IDLE';
 var bgmNextUrl = '';
-var BGM_MAX_VOL = 0.5;
+var BGM_VOL_MAP = {
+  'BGM/森.mp3': 0.15,
+  'BGM/カフェ.mp3': 0.5,
+  'BGM/シマワキ.mp3': 0.5
+};
 
 function playBGM(url, slowFadeIn) {
   if (currentBGMUrl === url && bgmState !== 'FADE_OUT') {
@@ -103,12 +107,11 @@ function updateBGM() {
       if (bgmNextUrl) { _startBGM(bgmNextUrl, bgmNextUrl === 'BGM/シマワキ.mp3'); bgmNextUrl = ''; }
       else { bgmState = 'IDLE'; currentBGMUrl = ''; }
     }
-  } else if (bgmState === 'FADE_IN') {
-    bgmVol = Math.min(BGM_MAX_VOL, bgmVol + 0.015);
-    if (bgmVol === BGM_MAX_VOL) bgmState = 'PLAYING';
-  } else if (bgmState === 'SLOW_FADE_IN') {
-    bgmVol = Math.min(BGM_MAX_VOL, bgmVol + 0.002);
-    if (bgmVol === BGM_MAX_VOL) bgmState = 'PLAYING';
+  } else if (bgmState === 'FADE_IN' || bgmState === 'SLOW_FADE_IN') {
+    var targetVol = BGM_VOL_MAP[currentBGMUrl] || 0.5;
+    var step = (bgmState === 'SLOW_FADE_IN') ? 0.002 : 0.015;
+    bgmVol = Math.min(targetVol, bgmVol + step);
+    if (bgmVol === targetVol) bgmState = 'PLAYING';
   }
   bgmAudio.volume = bgmVol;
 }
