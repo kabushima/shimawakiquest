@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<body>
+<canvas id="c" width="400" height="400"></canvas>
+<script>
+var ctx = document.getElementById('c').getContext('2d');
+var pal = {
+  'h':'#6b4422','H':'#8a5a30','s':'#f0c8a0','S':'#e0b088','j':'#3b6baa','J':'#2d5080','K':'#4a7cc0',
+  'p':'#5a6040','P':'#4a5030','b':'#b08040','B':'#8a6030','e':'#1a1200','w':'#fff','n':'#d4a870',
+  'k':'#3a2518','t':'#c49860','g':'#4e7a44','D':'#222'
+};
+
+var data = [
+  "      hhhh      ",
+  "     hhhhhh     ",
+  "    hHhhhhHh    ",
+  "   hhHhhhhHhh   ",
+  "   hssDssDssh   ",
+  "   hsssHHsssh   ",
+  "    hssssssh    ",
+  "     hssssh     ",
+  "      jjjj      ",
+  "    jjjjjjjj    ",
+  "   jjjwwBwjjj   ",
+  "   jjjwwBwjjj   ",
+  "   sjjwwwwjjs   ",
+  "   s jjBwjj s   ",
+  "     pppppp     ",
+  "    pppppppp    ",
+  "    pp    pp    ",
+  "    kk    kk    ",
+  "    kk    kk    "
+];
+
+for(var r=0;r<data.length;r++){
+  for(var c=0;c<data[r].length;c++){
+    var ch=data[r][c];
+    if(ch!==' '){
+      ctx.fillStyle=pal[ch]||'red';
+      ctx.fillRect(c*10,r*10,10,10);
+    }
+  }
+}
+</script>
+</body>
+</html>

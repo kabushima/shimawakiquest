@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>古民家カフェ RPG</title>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a14;touch-action:none;user-select:none;-webkit-user-select:none;font-family:'DotGothic16',monospace;}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;height:100dvh;}
+#wrap{position:relative;width:100%;max-width:600px;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+canvas{image-rendering:pixelated;image-rendering:crisp-edges;width:100%;max-width:600px;aspect-ratio:480/320;display:block;border:2px solid #2a2a3a;border-radius:4px;box-shadow:0 0 30px rgba(30,30,80,0.4);}
+#controls{width:100%;max-width:600px;height:150px;display:flex;justify-content:space-between;align-items:center;padding:10px 28px;flex-shrink:0;}
+.dpad{position:relative;width:130px;height:130px;}
+.dpad-btn{position:absolute;width:42px;height:42px;background:rgba(255,255,255,0.1);border:2px solid rgba(255,255,255,0.2);border-radius:10px;color:rgba(255,255,255,0.4);font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 0.08s;-webkit-tap-highlight-color:transparent;}
+.dpad-btn:active,.dpad-btn.active{background:rgba(255,255,255,0.28);border-color:rgba(255,255,255,0.4);}
+.dpad-up{top:0;left:44px;}
+.dpad-down{bottom:0;left:44px;}
+.dpad-left{top:44px;left:0;}
+.dpad-right{top:44px;right:0;}
+.dpad-center{top:44px;left:44px;width:42px;height:42px;background:rgba(255,255,255,0.04);border:2px solid rgba(255,255,255,0.08);border-radius:10px;position:absolute;pointer-events:none;}
+.action-btn{width:66px;height:66px;background:rgba(200,60,60,0.2);border:2px solid rgba(200,60,60,0.45);border-radius:50%;color:rgba(255,255,255,0.6);font-size:20px;font-weight:bold;font-family:'DotGothic16',monospace;cursor:pointer;transition:background 0.08s;-webkit-tap-highlight-color:transparent;}
+.action-btn:active,.action-btn.active{background:rgba(200,60,60,0.45);border-color:rgba(200,60,60,0.7);}
+#hint{color:rgba(255,255,255,0.25);font-size:11px;text-align:center;padding:6px;font-family:'DotGothic16',monospace;}
+@media(min-width:769px) and (hover:hover){
+  #controls{height:auto;padding:8px 24px;}
+  .dpad,.action-btn{display:none;}
+  #hint{display:block;}
+}
+@media(max-width:768px),(hover:none){
+  #hint{display:none;}
+}
+</style>
+</head>
+<body>
+<div id="wrap">
+<canvas id="game" width="480" height="320"></canvas>
+<div id="controls">
+<div class="dpad">
+<div class="dpad-center"></div>
+<button class="dpad-btn dpad-up" data-dir="up">▲</button>
+<button class="dpad-btn dpad-down" data-dir="down">▼</button>
+<button class="dpad-btn dpad-left" data-dir="left">◀</button>
+<button class="dpad-btn dpad-right" data-dir="right">▶</button>
+</div>
+<button class="action-btn" id="actionBtn">A</button>
+</div>
+<div id="hint">矢印キー/WASD: 移動 ｜ Z/Enter/Space: 決定</div>
+</div>
+
+<script>
+"use strict";
+
+// ===== CONSTANTS =====
+var canvas = document.getElementById('game');
+var ctx = canvas.getContext('2d');
+var CANVAS_W = 480, CANVAS_H = 320, TILE = 32;
+
+// ===== AUDIO =====
+var audioCtx = null;
+var audioInitialized = false;
+var bgmAudio = new Audio();
+bgmAudio.loop = true;
+var currentBGMUrl = '';
+var bgmVol = 0;
+var bgmState = 'IDLE';
+var bgmNextUrl = '';
+var BGM_MAX_VOL = 0.5;
+
+function playBGM(url, slowFadeIn) {
+  if (currentBGMUrl === url && bgmState !== 'FADE_OUT') return;
+  if (!url) { bgmNextUrl = ''; bgmState = 'FADE_OUT'; return; }
+  bgmNextUrl = url;
+  if (currentBGMUrl && !bgmAudio.paused && bgmVol > 0) bgmState = 'FADE_OUT';
+  else _startBGM(url, slowFadeIn);
+}
+function stopBGM() { playBGM(''); }
+function _startBGM(url, slowFadeIn) {
+  bgmAudio.src = url; bgmAudio.volume = 0; bgmVol = 0;
+  bgmState = slowFadeIn ? 'SLOW_FADE_IN' : 'FADE_IN';
+  var p = bgmAudio.play();
+  if (p) p.catch(function(e){});
+  currentBGMUrl = url;
+}
+function updateBGM() {
+  if (bgmState === 'FADE_OUT') {
+    bgmVol = Math.max(0, bgmVol - 0.02);
+    if (bgmVol === 0) {
+      bgmAudio.pause();
+      if (bgmNextUrl) { _startBGM(bgmNextUrl, bgmNextUrl === 'BGM/シマワキ.mp3'); bgmNextUrl = ''; }
+      else { bgmState = 'IDLE'; currentBGMUrl = ''; }
+    }
+  } else if (bgmState === 'FADE_IN') {
+    bgmVol = Math.min(BGM_MAX_VOL, bgmVol + 0.015);
+    if (bgmVol === BGM_MAX_VOL) bgmState = 'PLAYING';
+  } else if (bgmState === 'SLOW_FADE_IN') {
+    bgmVol = Math.min(BGM_MAX_VOL, bgmVol + 0.002);
+    if (bgmVol === BGM_MAX_VOL) bgmState = 'PLAYING';
+  }
+  bgmAudio.volume = bgmVol;
+}
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!audioInitialized) {
+    audioInitialized = true;
+    if (currentMap === 'forest') playBGM('BGM/森.mp3');
+    else playBGM('BGM/カフェ.mp3');
+  }
+}
+function playSound(type) {
+  ensureAudio(); if (!audioCtx) return;
+  var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.connect(g); g.connect(audioCtx.destination);
+  var t = audioCtx.currentTime;
+  switch (type) {
+    case 'text': o.type='square'; o.frequency.value=880; g.gain.setValueAtTime(0.03,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.04); o.start(t); o.stop(t+0.04); break;
+    case 'select': o.type='square'; o.frequency.value=440; g.gain.setValueAtTime(0.05,t); o.start(t); o.frequency.setValueAtTime(660,t+0.06); g.gain.exponentialRampToValueAtTime(0.001,t+0.12); o.stop(t+0.12); break;
+    case 'confirm': o.type='square'; o.frequency.value=523; g.gain.setValueAtTime(0.05,t); o.start(t); o.frequency.setValueAtTime(784,t+0.08); g.gain.exponentialRampToValueAtTime(0.001,t+0.16); o.stop(t+0.16); break;
+    case 'door': o.type='triangle'; o.frequency.value=200; g.gain.setValueAtTime(0.07,t); o.start(t); o.frequency.linearRampToValueAtTime(500,t+0.25); g.gain.exponentialRampToValueAtTime(0.001,t+0.35); o.stop(t+0.35); break;
+    case 'clear': o.type='square'; g.gain.setValueAtTime(0.05,t); o.frequency.setValueAtTime(523,t); o.frequency.setValueAtTime(659,t+0.15); o.frequency.setValueAtTime(784,t+0.3); o.frequency.setValueAtTime(1047,t+0.45); g.gain.setValueAtTime(0.05,t+0.45); g.gain.exponentialRampToValueAtTime(0.001,t+0.8); o.start(t); o.stop(t+0.8); break;
+  }
+}
+
+// ===== TILE TYPES =====
+var TL = {
+  GRASS:0, TREE:1, PATH:2, WALL:3, ROOF:4, DOOR_OUT:5, SIGN:6, FLOWER:7,
+  FLOOR:10, IN_WALL:11, COUNTER:12, TABLE:13, CHAIR:14, DOOR_IN:15, SHELF:16,
+  CHIMNEY:17, ROOF_EDGE:18, WALL_WIN:19, DOOR_BACK:20
+};
+var SOLID_SET = new Set([TL.TREE,TL.WALL,TL.ROOF,TL.IN_WALL,TL.COUNTER,TL.TABLE,TL.SHELF,TL.CHIMNEY,TL.ROOF_EDGE,TL.WALL_WIN,TL.DOOR_BACK]);
+
+// ===== MAP DATA =====
+var o=TL.GRASS, t=TL.TREE, p=TL.PATH, w=TL.WALL, r=TL.ROOF, d=TL.DOOR_OUT, si=TL.SIGN, f=TL.FLOWER;
+var fl=TL.FLOOR, iw=TL.IN_WALL, co=TL.COUNTER, tb=TL.TABLE, ch=TL.CHAIR, di=TL.DOOR_IN, sh=TL.SHELF;
+var cm=TL.CHIMNEY, re=TL.ROOF_EDGE, ww=TL.WALL_WIN, db=TL.DOOR_BACK;
+
+var forestMap = [
+  [t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t],
+  [t,o,o,t,o,o,f,o,o,t,o,o,o,o,t,o,f,o,o,t],
+  [t,o,o,o,o,o,o,o,o,o,o,o,t,o,o,o,o,o,o,t],
+  [t,t,o,o,o,o,o,re,re,re,re,re,re,re,o,o,o,o,t,t],
+  [t,o,o,o,t,o,o,r,r,r,cm,r,r,r,o,o,o,o,o,t],
+  [t,o,o,o,o,o,o,w,ww,w,w,w,ww,w,o,f,o,t,o,t],
+  [t,o,t,o,o,o,o,w,w,w,w,w,w,w,o,o,o,o,o,t],
+  [t,o,o,o,o,o,o,w,w,d,w,w,w,w,o,o,o,o,o,t],
+  [t,o,o,o,o,o,o,o,si,o,o,o,o,o,o,o,t,o,o,t],
+  [t,t,o,o,o,o,o,p,p,p,p,o,o,o,o,o,o,o,t,t],
+  [t,o,o,o,o,o,p,p,o,o,p,p,o,o,o,o,o,o,o,t],
+  [t,o,o,t,o,p,p,o,o,o,o,p,p,o,f,o,t,o,o,t],
+  [t,o,o,o,o,p,o,o,o,t,o,o,p,o,o,o,o,o,o,t],
+  [t,o,o,o,p,p,o,t,o,o,o,o,p,p,o,o,o,t,o,t],
+  [t,t,o,o,p,o,o,o,o,o,o,o,o,p,o,o,o,o,t,t],
+  [t,o,o,p,p,o,o,o,o,o,t,o,o,p,p,o,o,o,o,t],
+  [t,o,o,p,o,o,t,o,o,o,o,o,o,o,p,o,o,t,o,t],
+  [t,o,o,p,o,o,o,o,o,o,o,o,t,o,p,o,o,o,o,t],
+  [t,o,o,p,p,o,o,o,t,o,o,o,o,o,p,o,o,o,o,t],
+  [t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t,t]
+];
+
+var indoorMap = [
+  [iw,iw,iw,iw,iw,iw,db,iw,iw,iw,iw,iw],
+  [iw,sh,fl,fl,fl,fl,fl,fl,fl,fl,sh,iw],
+  [iw,fl,fl,fl,co,co,co,co,fl,fl,fl,iw],
+  [iw,fl,fl,fl,fl,fl,fl,fl,fl,fl,fl,iw],
+  [iw,fl,tb,ch,fl,fl,fl,tb,ch,fl,fl,iw],
+  [iw,fl,fl,fl,fl,fl,fl,fl,fl,fl,fl,iw],
+  [iw,fl,tb,ch,fl,fl,fl,fl,fl,fl,fl,iw],
+  [iw,fl,fl,fl,fl,fl,fl,fl,fl,fl,fl,iw],
+  [iw,iw,iw,iw,iw,di,iw,iw,iw,iw,iw,iw]
+];
+
+// ===== GAME STATE =====
+var currentMap = 'forest';
+var gameState = 'EXPLORE';
+var storyPhase = 0;
+var flags = { firstVisit: true };
+
+var player = { x:3, y:17, px:0, py:0, dir:3, moving:false, moveFrame:0, animFrame:0, animTimer:0, visible:true };
+function resetPlayer(x, y, dir) {
+  player.x=x; player.y=y; player.px=x*TILE; player.py=y*TILE;
+  player.dir=dir||0; player.moving=false; player.moveFrame=0;
+}
+resetPlayer(3, 17, 3);
+
+var npcs = [];
+var shopkeeper = null, shimawaki = null;
+
+// ===== DIALOGUE STATE =====
+var dlgQueue=[], dlgText='', dlgDisplayed=0, dlgSpeaker='', dlgTimer=0, dlgDone=false, dlgCallback=null;
+var choices=null, choiceIdx=0;
+var exclamation = { show:false, x:0, y:0, timer:0 };
+
+// ===== FADE =====
+var fadeAlpha=0, fadeDir=0, fadeCb=null, fadeColor='black';
+
+// ===== INPUT =====
+var keys = { up:false, down:false, left:false, right:false, action:false };
+var actionJustPressed=false, prevAction=false, prevUp=false, prevDown=false;
+
+document.addEventListener('keydown', function(e) {
+  ensureAudio();
+  if (e.code==='ArrowUp'||e.code==='KeyW') { keys.up=true; e.preventDefault(); }
+  if (e.code==='ArrowDown'||e.code==='KeyS') { keys.down=true; e.preventDefault(); }
+  if (e.code==='ArrowLeft'||e.code==='KeyA') { keys.left=true; e.preventDefault(); }
+  if (e.code==='ArrowRight'||e.code==='KeyD') { keys.right=true; e.preventDefault(); }
+  if (e.code==='KeyZ'||e.code==='Enter'||e.code==='Space') { keys.action=true; e.preventDefault(); }
+});
+document.addEventListener('keyup', function(e) {
+  if (e.code==='ArrowUp'||e.code==='KeyW') keys.up=false;
+  if (e.code==='ArrowDown'||e.code==='KeyS') keys.down=false;
+  if (e.code==='ArrowLeft'||e.code==='KeyA') keys.left=false;
+  if (e.code==='ArrowRight'||e.code==='KeyD') keys.right=false;
+  if (e.code==='KeyZ'||e.code==='Enter'||e.code==='Space') keys.action=false;
+});
+
+// Touch d-pad
+document.querySelectorAll('.dpad-btn[data-dir]').forEach(function(btn) {
+  var dd = btn.dataset.dir;
+  function onT() { ensureAudio(); keys[dd]=true; btn.classList.add('active'); }
+  function offT() { keys[dd]=false; btn.classList.remove('active'); }
+  btn.addEventListener('touchstart', function(e){e.preventDefault();onT();});
+  btn.addEventListener('touchend', function(e){e.preventDefault();offT();});
+  btn.addEventListener('touchcancel', offT);
+  btn.addEventListener('mousedown', onT);
+  btn.addEventListener('mouseup', offT);
+  btn.addEventListener('mouseleave', offT);
+});
+var aBtn = document.getElementById('actionBtn');
+function aOn(){ ensureAudio(); keys.action=true; aBtn.classList.add('active'); }
+function aOff(){ keys.action=false; aBtn.classList.remove('active'); }
+aBtn.addEventListener('touchstart', function(e){e.preventDefault();aOn();});
+aBtn.addEventListener('touchend', function(e){e.preventDefault();aOff();});
+aBtn.addEventListener('touchcancel', aOff);
+aBtn.addEventListener('mousedown', aOn);
+aBtn.addEventListener('mouseup', aOff);
+aBtn.addEventListener('mouseleave', aOff);
+
+// ===== CAMERA =====
+function getMap() { return currentMap==='forest' ? forestMap : indoorMap; }
+function getCam() {
+  var map=getMap(), mw=map[0].length*TILE, mh=map.length*TILE;
+  if (mw<=CANVAS_W && mh<=CANVAS_H) return { x:-(CANVAS_W-mw)/2, y:-(CANVAS_H-mh)/2 };
+  var cx=player.px+TILE/2-CANVAS_W/2, cy=player.py+TILE/2-CANVAS_H/2;
+  cx=Math.max(0,Math.min(cx,mw-CANVAS_W));
+  cy=Math.max(0,Math.min(cy,mh-CANVAS_H));
+  return { x:cx, y:cy };
+}
+
+// ===== TILE RENDERING =====
+var tileHash = function(tx,ty){ return ((tx*7+ty*13)&0xFF); };
+function drawTile(tx, ty, type, sx, sy) {
+  var x=tx*TILE-sx, y=ty*TILE-sy;
+  if (x<-TILE||x>CANVAS_W||y<-TILE||y>CANVAS_H) return;
+  var h=tileHash(tx,ty);
+  switch(type) {
+    case TL.GRASS:
+      ctx.fillStyle='#4a8c3f'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#438536'; ctx.fillRect(x+(h%7)*4,y+(h%5)*6,4,2); ctx.fillRect(x+((h+3)%8)*4,y+((h+2)%5)*6+2,2,2);
+      ctx.fillStyle='#56964a'; ctx.fillRect(x+(h%6)*4+2,y+(h%4)*6+4,3,2); ctx.fillRect(x+((h+5)%7)*4,y+((h+1)%6)*5,2,3);
+      ctx.fillStyle='#3d7a34'; ctx.fillRect(x+((h+2)%8)*4,y+((h+4)%5)*6,2,2);
+      if(h%5===0){ ctx.fillStyle='#62a858'; ctx.fillRect(x+12,y+8,2,4); ctx.fillRect(x+10,y+10,6,2); }
+      break;
+    case TL.TREE:
+      ctx.fillStyle='#4a8c3f'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#438536'; ctx.fillRect(x+(h%5)*4,y+24,6,2);
+      // trunk
+      ctx.fillStyle='#5c3d1e'; ctx.fillRect(x+12,y+20,8,12);
+      ctx.fillStyle='#4a3018'; ctx.fillRect(x+12,y+20,2,12);
+      ctx.fillStyle='#6b4a28'; ctx.fillRect(x+18,y+22,2,10);
+      // canopy layers
+      ctx.fillStyle='#1e5a1e'; ctx.fillRect(x+4,y+4,24,18);
+      ctx.fillStyle='#2d6b2e'; ctx.fillRect(x+2,y+6,28,14);
+      ctx.fillStyle='#3a8035'; ctx.fillRect(x+6,y+2,20,16);
+      ctx.fillStyle='#48923e'; ctx.fillRect(x+8,y+4,16,10);
+      // highlights
+      ctx.fillStyle='#56a048'; ctx.fillRect(x+10,y+4,4,2); ctx.fillRect(x+18,y+6,4,2);
+      ctx.fillRect(x+6,y+10,3,2);
+      // dark spots
+      ctx.fillStyle='#1a4e1a'; ctx.fillRect(x+6,y+14,4,4); ctx.fillRect(x+22,y+10,4,4);
+      ctx.fillRect(x+14,y+8,2,2);
+      break;
+    case TL.PATH:
+      ctx.fillStyle='#c4a86a'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#b89b5e'; ctx.fillRect(x+(h%4)*6,y+(h%3)*8+2,6,4);
+      ctx.fillStyle='#d4b87a'; ctx.fillRect(x+((h+2)%5)*6,y+((h+1)%4)*8,4,3);
+      ctx.fillStyle='#a88e54'; ctx.fillRect(x+((h+3)%6)*5,y+((h+2)%5)*6,3,2);
+      // small stones
+      ctx.fillStyle='#9a8450'; ctx.fillRect(x+8+(h%3)*4,y+20,3,2);
+      ctx.fillStyle='#d8c488'; ctx.fillRect(x+4+(h%4)*5,y+10,2,2);
+      break;
+    case TL.WALL:
+      // Traditional dark wood wall
+      ctx.fillStyle='#5c3d2e'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#4e3326'; ctx.fillRect(x,y+15,TILE,2); ctx.fillRect(x+15,y,2,TILE);
+      ctx.fillStyle='#6b4a38'; ctx.fillRect(x+2,y+2,4,12); ctx.fillRect(x+18,y+2,4,12);
+      ctx.fillStyle='#503020'; ctx.fillRect(x,y+30,TILE,2);
+      break;
+    case TL.WALL_WIN:
+      ctx.fillStyle='#5c3d2e'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#4e3326'; ctx.fillRect(x,y+15,TILE,2);
+      // Shoji-style window
+      ctx.fillStyle='#e8dcc8'; ctx.fillRect(x+4,y+4,24,20);
+      ctx.fillStyle='#5c3d2e'; ctx.fillRect(x+4,y+4,24,2); ctx.fillRect(x+4,y+22,24,2);
+      ctx.fillRect(x+4,y+4,2,20); ctx.fillRect(x+26,y+4,2,20);
+      ctx.fillRect(x+15,y+4,2,20); ctx.fillRect(x+4,y+13,24,2);
+      ctx.fillStyle='#d8ccb4'; ctx.fillRect(x+7,y+7,7,5); ctx.fillRect(x+18,y+16,7,5);
+      break;
+    case TL.ROOF:
+      // Japanese kawara-style tile roof
+      ctx.fillStyle='#3d2b1f'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#4a3528'; ctx.fillRect(x,y+7,TILE,4); ctx.fillRect(x,y+20,TILE,4);
+      ctx.fillStyle='#352018'; ctx.fillRect(x,y+10,TILE,2); ctx.fillRect(x,y+23,TILE,2);
+      ctx.fillStyle='#503828'; ctx.fillRect(x+4,y+2,6,4); ctx.fillRect(x+14,y+2,6,4);
+      ctx.fillRect(x+8,y+14,6,4); ctx.fillRect(x+20,y+14,6,4);
+      ctx.fillStyle='#2a1c12'; ctx.fillRect(x,y+5,TILE,2); ctx.fillRect(x,y+18,TILE,2);
+      break;
+    case TL.ROOF_EDGE:
+      // Roof ridge (top of the roof)
+      ctx.fillStyle='#2a1c12'; ctx.fillRect(x,y,TILE,TILE);
+      // The ridge tiles
+      ctx.fillStyle='#3d2b1f'; ctx.fillRect(x,y+8,TILE,24);
+      ctx.fillStyle='#503828'; ctx.fillRect(x,y+8,TILE,4);
+      ctx.fillStyle='#2a1c12'; ctx.fillRect(x,y+28,TILE,4);
+      // vertical tile divisions
+      ctx.fillStyle='#2a1c12'; ctx.fillRect(x+14,y+8,4,24);
+      ctx.fillStyle='#4a3528'; ctx.fillRect(x+4,y+12,8,16); ctx.fillRect(x+20,y+12,8,16);
+      break;
+    case TL.CHIMNEY:
+      ctx.fillStyle='#3d2b1f'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#4a3528'; ctx.fillRect(x,y+7,TILE,4);
+      // Chimney structure
+      ctx.fillStyle='#6b4e3a'; ctx.fillRect(x+10,y-6,12,20);
+      ctx.fillStyle='#5c3d2e'; ctx.fillRect(x+10,y-6,12,3);
+      ctx.fillStyle='#7a5c44'; ctx.fillRect(x+12,y-4,8,2);
+      ctx.fillStyle='#4a3020'; ctx.fillRect(x+10,y+2,2,12); ctx.fillRect(x+20,y+2,2,12);
+      break;
+    case TL.DOOR_OUT:
+      ctx.fillStyle='#5c3d2e'; ctx.fillRect(x,y,TILE,TILE);
+      // Wooden sliding door
+      ctx.fillStyle='#3a2518'; ctx.fillRect(x+3,y+1,26,30);
+      ctx.fillStyle='#2e1c10'; ctx.fillRect(x+3,y+1,26,2);
+      ctx.fillStyle='#4a3020'; ctx.fillRect(x+5,y+4,10,26); ctx.fillRect(x+17,y+4,10,26);
+      ctx.fillStyle='#5a3e2a'; ctx.fillRect(x+7,y+6,6,10); ctx.fillRect(x+19,y+6,6,10);
+      ctx.fillStyle='#c4a050'; ctx.fillRect(x+14,y+14,4,6); // door handle
+      ctx.fillStyle='#a88838'; ctx.fillRect(x+14,y+14,4,2);
+      break;
+    case TL.SIGN:
+      ctx.fillStyle='#4a8c3f'; ctx.fillRect(x,y,TILE,TILE);
+      // Wooden sign post
+      ctx.fillStyle='#5c3d1e'; ctx.fillRect(x+14,y+16,4,16);
+      ctx.fillStyle='#7a5c3e'; ctx.fillRect(x+3,y+4,26,14);
+      ctx.fillStyle='#8c6a48'; ctx.fillRect(x+3,y+4,26,2);
+      ctx.fillStyle='#6b4e30'; ctx.fillRect(x+3,y+16,26,2);
+      ctx.font='7px DotGothic16'; ctx.fillStyle='#2a1a0a'; ctx.fillText('準備中',x+6,y+14);
+      break;
+    case TL.FLOWER:
+      ctx.fillStyle='#4a8c3f'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#438536'; ctx.fillRect(x+8,y+20,2,4); ctx.fillRect(x+20,y+16,2,6);ctx.fillRect(x+14,y+24,2,4);
+      // flowers
+      ctx.fillStyle='#e06080'; ctx.fillRect(x+6,y+8,6,6); ctx.fillStyle='#ff7898'; ctx.fillRect(x+8,y+10,2,2);
+      ctx.fillStyle='#e0c040'; ctx.fillRect(x+18,y+12,6,6); ctx.fillStyle='#f0d060'; ctx.fillRect(x+20,y+14,2,2);
+      ctx.fillStyle='#8060d0'; ctx.fillRect(x+12,y+20,6,6); ctx.fillStyle='#9878e0'; ctx.fillRect(x+14,y+22,2,2);
+      break;
+    case TL.FLOOR:
+      // Japanese wooden floor boards
+      ctx.fillStyle='#a07850'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#967040'; ctx.fillRect(x,y+15,TILE,1); ctx.fillRect(x,y+31,TILE,1);
+      ctx.fillStyle='#aa8258'; ctx.fillRect(x+4,y+4,2,10); ctx.fillRect(x+20,y+20,2,10);
+      ctx.fillStyle='#8c6844'; ctx.fillRect(x+16,y,1,15); ctx.fillRect(x+8,y+16,1,16);
+      break;
+    case TL.IN_WALL:
+      ctx.fillStyle='#6b5744'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#5c4a38'; ctx.fillRect(x,y+TILE-2,TILE,2);
+      ctx.fillStyle='#7a6854'; ctx.fillRect(x,y,TILE,2);
+      ctx.fillStyle='#625040'; ctx.fillRect(x+16,y,1,TILE);
+      ctx.fillStyle='#72604c'; ctx.fillRect(x+8,y+8,2,2); ctx.fillRect(x+24,y+20,2,2);
+      break;
+    case TL.COUNTER:
+      ctx.fillStyle='#7a5c3e'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#8c6a48'; ctx.fillRect(x,y,TILE,4);
+      ctx.fillStyle='#9a7a55'; ctx.fillRect(x+2,y+1,TILE-4,2);
+      ctx.fillStyle='#6b4e3a'; ctx.fillRect(x,y+TILE-4,TILE,4);
+      ctx.fillStyle='#5c4030'; ctx.fillRect(x,y+TILE-2,TILE,2);
+      // cups/items on counter
+      ctx.fillStyle='#e0d0c0'; ctx.fillRect(x+6,y+6,4,6);ctx.fillRect(x+22,y+6,4,6);
+      ctx.fillStyle='#c0b0a0'; ctx.fillRect(x+6,y+6,4,2);ctx.fillRect(x+22,y+6,4,2);
+      break;
+    case TL.TABLE:
+      ctx.fillStyle='#a07850'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#967040'; ctx.fillRect(x,y+15,TILE,1);
+      // table top
+      ctx.fillStyle='#6b4e3a'; ctx.fillRect(x+2,y+4,28,20);
+      ctx.fillStyle='#7a5c44'; ctx.fillRect(x+4,y+6,24,16);
+      ctx.fillStyle='#8a6a50'; ctx.fillRect(x+6,y+8,20,12);
+      // table legs
+      ctx.fillStyle='#5c3d2e'; ctx.fillRect(x+4,y+22,4,8); ctx.fillRect(x+24,y+22,4,8);
+      break;
+    case TL.CHAIR:
+      ctx.fillStyle='#a07850'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#967040'; ctx.fillRect(x,y+15,TILE,1);
+      // chair
+      ctx.fillStyle='#7a4520'; ctx.fillRect(x+8,y+6,16,4); // back
+      ctx.fillStyle='#8b5530'; ctx.fillRect(x+8,y+12,16,10); // seat
+      ctx.fillStyle='#6b3a18'; ctx.fillRect(x+8,y+22,4,8); ctx.fillRect(x+20,y+22,4,8); // legs
+      ctx.fillStyle='#9a6540'; ctx.fillRect(x+10,y+14,12,6);
+      break;
+    case TL.DOOR_IN:
+      ctx.fillStyle='#6b5744'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#3a2518'; ctx.fillRect(x+3,y,26,TILE);
+      ctx.fillStyle='#4a3020'; ctx.fillRect(x+5,y+2,10,28); ctx.fillRect(x+17,y+2,10,28);
+      ctx.fillStyle='#5a3e2a'; ctx.fillRect(x+7,y+4,6,12); ctx.fillRect(x+19,y+4,6,12);
+      ctx.fillStyle='#c4a050'; ctx.fillRect(x+14,y+14,4,6);
+      ctx.fillStyle='#a88838'; ctx.fillRect(x+14,y+14,4,2);
+      break;
+    case TL.DOOR_BACK:
+      ctx.fillStyle='#6b5744'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#5c3d2e'; ctx.fillRect(x+4,y+4,24,TILE-4);
+      ctx.fillStyle='#4e3326'; ctx.fillRect(x+6,y+6,20,TILE-6);
+      ctx.fillStyle='#c4a050'; ctx.fillRect(x+22,y+18,4,4);
+      break;
+    case TL.SHELF:
+      ctx.fillStyle='#6b5744'; ctx.fillRect(x,y,TILE,TILE);
+      ctx.fillStyle='#5c3d2e'; ctx.fillRect(x+2,y+2,28,28);
+      // shelf contents
+      ctx.fillStyle='#8b4513'; ctx.fillRect(x+4,y+4,10,10);
+      ctx.fillStyle='#a0522d'; ctx.fillRect(x+6,y+6,6,6);
+      ctx.fillStyle='#7a5c3e'; ctx.fillRect(x+18,y+4,10,10);
+      ctx.fillStyle='#d4a060'; ctx.fillRect(x+20,y+6,6,6);
+      // bottom shelf - bottles/jars
+      ctx.fillStyle='#2a6040'; ctx.fillRect(x+5,y+20,4,8); ctx.fillStyle='#306848'; ctx.fillRect(x+5,y+20,4,2);
+      ctx.fillStyle='#604020'; ctx.fillRect(x+11,y+22,4,6); ctx.fillStyle='#785030'; ctx.fillRect(x+11,y+22,4,2);
+      ctx.fillStyle='#804040'; ctx.fillRect(x+19,y+20,4,8); ctx.fillStyle='#904848'; ctx.fillRect(x+19,y+20,4,2);
+      ctx.fillStyle='#4060a0'; ctx.fillRect(x+25,y+22,3,6);
+      // shelf divider
+      ctx.fillStyle='#4e3326'; ctx.fillRect(x+2,y+15,28,3);
+      break;
+  }
+}
+
+// ===== CHARACTER PALETTES =====
+var playerPalette = { id:'player' };
+
+function makeShopkeeperPalette() { return { id:'shopkeeper' }; }
+function makeShimawakiPalette() { return { id:'shimawaki' }; }
+
+// ===== SPRITE DATA =====
+var SP = {};
+function drawSpriteData(c,x,y,data,pal){
+  for(var r=0;r<data.length;r++){
+    var row=data[r];
+    for(var col=0;col<row.length;col++){
+      var ch=row[col];
+      if(ch===' ')continue;
+      c.fillStyle=pal[ch]||'#f0f';
+      c.fillRect(x+col*2,y+r*2,2,2);
+    }
+  }
+}
+
+// PROTAGONIST
+SP.player = {
+  pal:{
+    'h':'#5c3a21','H':'#7b4d2b','s':'#f4d0b4','S':'#e2b490',
+    'j':'#2a4b7c','J':'#1e3659','K':'#3b68aa',
+    'w':'#e8e8e8','W':'#d0d0d0','b':'#8b5a2b','B':'#6b421a',
+    'p':'#556b2f','P':'#3e4f22','k':'#3d2314','e':'#111111',
+    'O':'#000000'
+  },
+  down:[
+    '   hhhhhh   ',
+    '  hHhhhhHh  ',
+    ' hHhhhhhhHh ',
+    ' hhhHhhHhhh ',
+    ' hhsssssshh ',
+    '  sssesess  ',
+    '  hssssssh  ',
+    '   hssssH   ',
+    '   jKwwKj   ',
+    '  jjjwwjjj  ',
+    '  jjKwwBjj  ',
+    '  jjJwwBjj  ',
+    '  jJjwwBjj  ',
+    '  sJjKKBjj  ',
+    '  s Jjjj s  ',
+    '    pppp    ',
+    '   pppppp   ',
+    '   pp  pp   ',
+    '   PP  PP   ',
+    '   kk  kk   ',
+    '   OO  OO   '
+  ],
+  up:[
+    '   hhhhhh   ',
+    '  hHhhhhHh  ',
+    ' hHhhhhhhHh ',
+    ' hhhHhhHhhh ',
+    ' hhhhhhhhhh ',
+    '  hhhhhhhh  ',
+    '  hhhhhhhh  ',
+    '   hhhhhh   ',
+    '   jKjjKj   ',
+    '  jjjjjjjj  ',
+    '  jjKjjjjj  ',
+    '  jjJjjjjj  ',
+    '  jJjBjjjj  ',
+    '  sJjBBKjj  ',
+    '  s Jjjj s  ',
+    '    pppp    ',
+    '   pppppp   ',
+    '   pp  pp   ',
+    '   PP  PP   ',
+    '   kk  kk   ',
+    '   OO  OO   '
+  ],
+  right:[
+    '   hhhhhh   ',
+    '  hHhhhhHh  ',
+    ' hHhhhhhhH  ',
+    ' hhhHhhHh   ',
+    ' hhsssshh   ',
+    '  hssseh    ',
+    '  hsssssh   ',
+    '   hssss    ',
+    '   jKjjj    ',
+    '  jjjwwjj   ',
+    '  jjKwwBjj  ',
+    '  jjJwwBj   ',
+    '  jJjwwBjj  ',
+    '  sJjKKBj   ',
+    '  s Jjjj    ',
+    '    pppp    ',
+    '   ppppp    ',
+    '   pp pp    ',
+    '   PP PP    ',
+    '   kk kk    ',
+    '   OO OO    '
+  ],
+  left:[
+    '   hhhhhh   ',
+    '  hHhhhhHh  ',
+    '  HhhhhhhHh ',
+    '   hHhhHhhh ',
+    '   hhsssshh ',
+    '    hesssh  ',
+    '   hsssssh  ',
+    '    sssshh  ',
+    '    jjjKj   ',
+    '   jjwwjjj  ',
+    '  jjBwwKjj  ',
+    '   jBwwJjj  ',
+    '  jjBwwjJj  ',
+    '   jBKKjJs  ',
+    '    jjjJ s  ',
+    '    pppp    ',
+    '    ppppp   ',
+    '    pp pp   ',
+    '    PP PP   ',
+    '    kk kk   ',
+    '    OO OO   '
+  ]
+};
+
+// SHOPKEEPER
+SP.shopkeeper = {
+  pal:{
+    'h':'#d4a038','H':'#f4c850','s':'#f4d0b4','S':'#e2b490',
+    'w':'#ffffff','W':'#e0e0e0','a':'#2a3b5c','A':'#1e2a44',
+    'k':'#3d2314','e':'#111111','r':'#8b2500','O':'#000000',
+    'b':'#1e2a44'
+  },
+  down:[
+    '    hhhh    ',
+    '   hHHHHh   ',
+    '  hHhhhhHh  ',
+    '  hhsssshh  ',
+    ' hhhseseshh ',
+    '  hHssssHh  ',
+    '  hHssssHh  ',
+    '   hssssh   ',
+    '   WwwwwW   ',
+    '  WwwwwwwW  ',
+    '  aawwwwaa  ',
+    '  aaWwwWaa  ',
+    '  sawaawas  ',
+    '  saaaaAas  ',
+    '   aaaaaa   ',
+    '   aaaaaa   ',
+    '   rraarr   ',
+    '   AA  AA   ',
+    '   kk  kk   ',
+    '   OO  OO   '
+  ],
+  up:[
+    '   hHHHHh   ',
+    '  hHhhhhHh  ',
+    '  hHhHhHHh  ',
+    '  hhHHHHhh  ',
+    ' hhhHHHHhhh ',
+    '  hHhHhHHh  ',
+    '  hHhHhHHh  ',
+    '   hhhhhh   ',
+    '   WwwwwW   ',
+    '  WwAwwAwW  ',
+    '  aaAwwAaa  ',
+    '  aaAwwAaa  ',
+    '  saAwwAas  ',
+    '  saAwwAas  ',
+    '   aaaaaa   ',
+    '   aaaaaa   ',
+    '   rraarr   ',
+    '   AA  AA   ',
+    '   kk  kk   ',
+    '   OO  OO   '
+  ],
+  right:[
+    '   hh       ',
+    '  hhhh      ',
+    ' hHhHhh     ',
+    ' hHhhhhh    ',
+    ' hhHssshh   ',
+    ' hhhseshh   ',
+    '  hHsssHh   ',
+    '  hHsssh    ',
+    '   Wwww     ',
+    '  WwwwwW    ',
+    '  aaawwaa   ',
+    '  aAawWaa   ',
+    '  saawaas   ',
+    '  saaaaAs   ',
+    '   aaaaa    ',
+    '   aaaaa    ',
+    '   rraar    ',
+    '   AA AA    ',
+    '   kk kk    ',
+    '   OO OO    '
+  ],
+  left:[
+    '       hh   ',
+    '      hhhh  ',
+    '     hhHhHh ',
+    '    hhhhhHh ',
+    '   hhsssHhh ',
+    '   hhseshhh ',
+    '   hHsssHh  ',
+    '    hsssHh  ',
+    '     wwwW   ',
+    '    WwwwwW  ',
+    '   aawwaaa  ',
+    '   aaWwaAa  ',
+    '   sawaaas  ',
+    '   sAaaaas  ',
+    '    aaaaa   ',
+    '    aaaaa   ',
+    '    raarr   ',
+    '    AA AA   ',
+    '    kk kk   ',
+    '    OO OO   '
+  ]
+};
+
+// SHIMAWAKI
+SP.shimawaki = {
+  pal:{
+    'h':'#3a2818','H':'#4a3525','s':'#f4d0b4','S':'#e2b490',
+    'j':'#2c2c2c','J':'#1e1e1e','K':'#3c3c3c','w':'#888888',
+    'c':'#4a4a4a','C':'#2a2a2a','g':'#aaccff','G':'#6688cc',
+    'p':'#383838','P':'#252525','k':'#111111','e':'#111111',
+    'b':'#4a3525','O':'#000000'
+  },
+  down:[
+    '   hHHHHh   ',
+    '  hHhHhHHh  ',
+    '  hHhhhhHh  ',
+    ' hhHssshHhh ',
+    ' hhsssssshh ',
+    ' hgGsggsghh ',
+    '  HssssssH  ',
+    '   hbbbbh   ',
+    '   jKwwKj   ',
+    '  jjjwwjjj  ',
+    '  CjjcCjjj  ',
+    '  CjCcCjjj  ',
+    '  sJjwwjJs  ',
+    '  sJjjjjJs  ',
+    '   JjjjjJ   ',
+    '    pppp    ',
+    '   pppppp   ',
+    '   pp  pp   ',
+    '   PP  PP   ',
+    '   kk  kk   ',
+    '   OO  OO   '
+  ],
+  up:[
+    '   hHHHHh   ',
+    '  hHhHhHHh  ',
+    '  hHhhhhHh  ',
+    ' hhHhhhhHhh ',
+    ' hhhhhhhhhh ',
+    ' hhhhhhhhhh ',
+    '  HhhhhhhH  ',
+    '   hhhhhh   ',
+    '   jKjjKj   ',
+    '  jjjjjjjj  ',
+    '  jjjcCjjC  ',
+    '  jjjcCcjC  ',
+    '  sJjjjjJs  ',
+    '  sJjjjjJs  ',
+    '   JjjjjJ   ',
+    '    pppp    ',
+    '   pppppp   ',
+    '   pp  pp   ',
+    '   PP  PP   ',
+    '   kk  kk   ',
+    '   OO  OO   '
+  ],
+  right:[
+    '   hHHHHh   ',
+    '  hHhHhHH   ',
+    '  hHhhhhHh  ',
+    ' hhHsssshh  ',
+    ' hhHsssehh  ',
+    ' hGgsssHh   ',
+    '  Hssssh    ',
+    '   hbbb     ',
+    '   jKjjj    ',
+    '  jjjwwjj   ',
+    '  CjjcCjj   ',
+    '  CjCcCjj   ',
+    '  sJjwwjJ   ',
+    '  sJjjjjJ   ',
+    '   Jjjjj    ',
+    '    pppp    ',
+    '   ppppp    ',
+    '   pp pp    ',
+    '   PP PP    ',
+    '   kk kk    ',
+    '   OO OO    '
+  ],
+  left:[
+    '   hHHHHh   ',
+    '   HHhHhHh  ',
+    '  hHhhhhHh  ',
+    '  hhssssHhh ',
+    '  hhHessshh ',
+    '   hHsssgGh ',
+    '    hssssH  ',
+    '     bbbh   ',
+    '    jjjKj   ',
+    '   jjwwjjj  ',
+    '   jjCcCjC  ',
+    '   jjCcCjC  ',
+    '   JjwwjJs  ',
+    '   JjjjjJs  ',
+    '    jjjjJ   ',
+    '    pppp    ',
+    '    ppppp   ',
+    '    pp pp   ',
+    '    PP PP   ',
+    '    kk kk   ',
+    '    OO OO   '
+  ]
+};
+
+// ===== CHARACTER DRAWING =====
+var dirNames=['down','left','right','up'];
+function drawChar(px, py, dir, frame, palette, sx, sy) {
+  var x=px-sx, y=py-sy;
+  if(x<-TILE||x>CANVAS_W||y<-TILE||y>CANVAS_H) return;
+  var step = frame%2===1 ? (frame%4===1?-1:1) : 0;
+  // shadow
+  ctx.fillStyle='rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(x+16,y+31,12,4,0,0,Math.PI*2);
+  ctx.fill();
+  var sp = SP[palette.id] || SP.player;
+  var dn = dirNames[dir];
+  var data = sp[dn] || sp.down;
+  drawSpriteData(ctx, x+4, y-10+step, data, sp.pal);
+}
+
+// ===== NPC =====
+function spawnNPCs() {
+  npcs.length=0;
+  if(currentMap==='indoor'){
+    shopkeeper={x:6,y:1,px:6*TILE,py:1*TILE,dir:0,palette:makeShopkeeperPalette(),visible:true,id:'shopkeeper'};
+    npcs.push(shopkeeper); shimawaki=null;
+  }
+}
+
+// ===== DIALOGUE SYSTEM =====
+function showText(speaker,text,cb){
+  dlgQueue.push({type:'text',speaker:speaker,text:text,cb:cb});
+  if(gameState!=='DIALOGUE'&&gameState!=='CHOICE') nextDialogue();
+}
+function showChoice(opts,cb){
+  dlgQueue.push({type:'choice',opts:opts,cb:cb});
+  if(gameState!=='DIALOGUE'&&gameState!=='CHOICE') nextDialogue();
+}
+function showPause(ms,cb){
+  dlgQueue.push({type:'pause',ms:ms,cb:cb});
+  if(gameState!=='DIALOGUE'&&gameState!=='CHOICE') nextDialogue();
+}
+function showAction(fn){ dlgQueue.push({type:'action',fn:fn}); }
+
+function nextDialogue(){
+  if(!dlgQueue.length){ gameState='EXPLORE'; dlgText=''; dlgSpeaker=''; choices=null; return; }
+  var ev=dlgQueue.shift();
+  if(ev.type==='text'){
+    gameState='DIALOGUE'; dlgSpeaker=ev.speaker; dlgText=ev.text;
+    dlgDisplayed=0; dlgTimer=0; dlgDone=false; dlgCallback=ev.cb||null;
+  }else if(ev.type==='choice'){
+    gameState='CHOICE'; choices=ev.opts; choiceIdx=0; dlgCallback=ev.cb||null;
+  }else if(ev.type==='pause'){
+    gameState='CUTSCENE';
+    setTimeout(function(){if(ev.cb)ev.cb();nextDialogue();},ev.ms);
+  }else if(ev.type==='action'){
+    ev.fn();
+  }
+}
+
+// ===== COLLISION =====
+var DIR_DX=[0,-1,1,0], DIR_DY=[1,0,0,-1];
+function isSolid(mx,my){
+  var map=getMap();
+  if(my<0||my>=map.length||mx<0||mx>=map[0].length) return true;
+  if(SOLID_SET.has(map[my][mx])) return true;
+  for(var i=0;i<npcs.length;i++){ if(npcs[i].visible&&npcs[i].x===mx&&npcs[i].y===my) return true; }
+  return false;
+}
+function getFacingTile(){ return{x:player.x+DIR_DX[player.dir],y:player.y+DIR_DY[player.dir]}; }
+
+function interact(){
+  var ft=getFacingTile(), map=getMap(), i;
+  for(i=0;i<npcs.length;i++){
+    if(npcs[i].visible&&npcs[i].x===ft.x&&npcs[i].y===ft.y){triggerNPCTalk(npcs[i]);return;}
+  }
+  if(currentMap==='indoor'){
+    if(ft.y>=0&&ft.y<map.length&&ft.x>=0&&ft.x<map[0].length&&map[ft.y][ft.x]===TL.COUNTER){
+      var bx=ft.x+DIR_DX[player.dir],by=ft.y+DIR_DY[player.dir];
+      for(i=0;i<npcs.length;i++){
+        if(npcs[i].visible&&npcs[i].x===bx&&npcs[i].y===by){triggerNPCTalk(npcs[i]);return;}
+      }
+    }
+  }
+  if(ft.y>=0&&ft.y<map.length&&ft.x>=0&&ft.x<map[0].length&&map[ft.y][ft.x]===TL.SIGN){
+    showText('','準備中……',null);
+  }
+}
+
+// ===== STORY =====
+function triggerNPCTalk(npc){
+  if(npc.id!=='shopkeeper') return;
+  if(player.y>npc.y) npc.dir=0;
+  else if(player.y<npc.y) npc.dir=3;
+  else if(player.x<npc.x) npc.dir=1;
+  else npc.dir=2;
+  if(storyPhase===0){
+    showText('店員','ごめんねお兄さん、まだ営業して\nないんだよ。\nまた出直してきておくれ。',function(){storyPhase=1;});
+  }else{ startMainDialogue(); }
+}
+
+function startMainDialogue(){
+  if(shopkeeper) shopkeeper.dir=0;
+  dlgQueue.length=0;
+  showText('店員','あれ、まだいたのかい。\n他にも何か用があるのかい？',null);
+  showChoice(['はい','いいえ'],function(idx){
+    if(idx===1){ showText('店員','そうかい。気をつけて帰りな。',null); return; }
+    showText('店員','ほう、聞こうじゃないか。\n用件は何だい？',null);
+    showChoice(['遊びに来た','撮影を依頼したい'],function(idx2){
+      if(idx2===0){ showText('店員','悪いが、うちらも忙しいんでね。\nまた今度にしてくれ。',null); return; }
+      showText('','……',null);
+      showPause(1000,null);
+      showText('店員','……ほう。\n誰に依頼したいんだい？',null);
+      showChoice(['伊藤ゴンザレス','シマワキ'],function(idx3){
+        if(idx3===0){ showText('店員','悪いが今そいつは出払ってるんだ。\nまた来てくれ。',null); return; }
+        triggerEnding();
+      });
+    });
+  });
+}
+
+function triggerEnding(){
+  stopBGM();
+  showText('店員','そうか。あんた、どこでその名を\n聞いた……？ いや、いい。\nちょっと待ってくれ。',null);
+  showAction(function(){
+    gameState='CUTSCENE';
+    if(shopkeeper) shopkeeper.dir=3;
+    var mv1=setInterval(function(){
+      if(!shopkeeper){clearInterval(mv1);return;}
+      shopkeeper.y--; shopkeeper.py=shopkeeper.y*TILE;
+      if(shopkeeper.y<=0){
+        clearInterval(mv1); shopkeeper.visible=false;
+        setTimeout(function(){
+          dlgQueue.length=0;
+          showText('店員の声','おい、お客さんだよ！\nあんたにお客さんだよ！',function(){
+            shimawaki={x:6,y:0,px:6*TILE,py:0,dir:0,palette:makeShimawakiPalette(),visible:true,id:'shimawaki'};
+            npcs.push(shimawaki); gameState='CUTSCENE';
+            var mv2=setInterval(function(){
+              if(!shimawaki){clearInterval(mv2);return;}
+              shimawaki.y++; shimawaki.py=shimawaki.y*TILE;
+              if(shimawaki.y>=1){
+                clearInterval(mv2); shimawaki.dir=0;
+                setTimeout(function(){
+                  playBGM('BGM/シマワキ.mp3', true);
+                  showText('シマワキ','待たせたな。\nよくこの店がわかったな、\n要件を聞こうか。',function(){
+                    flags.cleared=true; fadeColor='white'; fadeDir=1;
+                    fadeCb=function(){gameState='ENDING';playSound('clear');};
+                  });
+                },400);
+              }
+            },250);
+          });
+        },600);
+      }
+    },250);
+  });
+}
+
+function enterHouse(){
+  playSound('door');
+  playBGM('BGM/カフェ.mp3');
+  fadeDir=1; fadeColor='black';
+  fadeCb=function(){
+    currentMap='indoor'; resetPlayer(5,7,3); spawnNPCs();
+    fadeDir=-1; fadeColor='black';
+    fadeCb=function(){
+      if(flags.firstVisit){
+        flags.firstVisit=false; gameState='CUTSCENE';
+        exclamation={show:true,x:shopkeeper.x,y:shopkeeper.y,timer:0};
+        setTimeout(function(){
+          exclamation.show=false;
+          if(shopkeeper) shopkeeper.dir=0;
+          showText('店員','ごめんねお兄さん、まだ営業して\nないんだよ。\nまた出直してきておくれ。',function(){storyPhase=1;});
+        },900);
+      }
+    };
+  };
+}
+
+function exitHouse(){
+  playSound('door');
+  playBGM('BGM/森.mp3');
+  fadeDir=1; fadeColor='black';
+  fadeCb=function(){
+    currentMap='forest'; resetPlayer(9,8,0);
+    npcs.length=0; shopkeeper=null; shimawaki=null;
+    fadeDir=-1; fadeCb=null; fadeColor='black';
+  };
+}
+
+// ===== MOVEMENT =====
+var MOVE_FRAMES=8, MOVE_SPD=TILE/MOVE_FRAMES;
+function updatePlayer(){
+  if(player.moving){
+    player.moveFrame++;
+    player.px+=DIR_DX[player.dir]*MOVE_SPD;
+    player.py+=DIR_DY[player.dir]*MOVE_SPD;
+    player.animTimer++;
+    if(player.animTimer%4===0) player.animFrame=(player.animFrame+1)%4;
+    if(player.moveFrame>=MOVE_FRAMES){
+      player.moving=false; player.moveFrame=0;
+      player.px=player.x*TILE; player.py=player.y*TILE;
+      checkTrigger();
+    }
+    return;
+  }
+  player.animFrame=0;
+  var dir=-1;
+  if(keys.up) dir=3; else if(keys.down) dir=0; else if(keys.left) dir=1; else if(keys.right) dir=2;
+  if(dir>=0){
+    player.dir=dir;
+    var nx=player.x+DIR_DX[dir], ny=player.y+DIR_DY[dir];
+    if(!isSolid(nx,ny)){ player.x=nx; player.y=ny; player.moving=true; player.moveFrame=0; }
+  }
+}
+function checkTrigger(){
+  var map=getMap(), tile=map[player.y]&&map[player.y][player.x];
+  if(currentMap==='forest'&&tile===TL.DOOR_OUT) enterHouse();
+  if(currentMap==='indoor'&&tile===TL.DOOR_IN) exitHouse();
+}
+
+// ===== DQ WINDOW =====
+function rrect(x,y,w,h,r){
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+}
+function drawDQWin(x,y,w,h){
+  ctx.fillStyle='#0d0d4d'; ctx.beginPath(); rrect(x,y,w,h,6); ctx.fill();
+  ctx.fillStyle='#1a1a7e'; ctx.beginPath(); rrect(x+3,y+3,w-6,h-6,4); ctx.fill();
+  ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); rrect(x+1,y+1,w-2,h-2,5); ctx.stroke();
+  ctx.strokeStyle='#aac'; ctx.lineWidth=1; ctx.beginPath(); rrect(x+4,y+4,w-8,h-8,3); ctx.stroke();
+}
+
+function drawMsgWin(){
+  var wx=16,wy=CANVAS_H-96,ww=CANVAS_W-32,wh=80;
+  drawDQWin(wx,wy,ww,wh);
+  if(dlgSpeaker){
+    var nw=dlgSpeaker.length*15+24;
+    drawDQWin(wx,wy-24,nw,22);
+    ctx.fillStyle='#fff'; ctx.font='13px DotGothic16';
+    ctx.textBaseline='middle'; ctx.fillText(dlgSpeaker,wx+12,wy-13); ctx.textBaseline='alphabetic';
+  }
+  ctx.fillStyle='#fff'; ctx.font='14px DotGothic16';
+  var shown=dlgText.substring(0,dlgDisplayed), lines=shown.split('\n');
+  for(var i=0;i<lines.length;i++) ctx.fillText(lines[i],wx+14,wy+22+i*20);
+  if(dlgDone&&gameState==='DIALOGUE'&&Math.floor(Date.now()/400)%2) ctx.fillText('▼',wx+ww-28,wy+wh-12);
+  if(gameState==='CHOICE'&&choices){
+    var cw=200,clh=26,ch2=choices.length*clh+16;
+    var cx=CANVAS_W-cw-24,cy=wy-ch2-8;
+    drawDQWin(cx,cy,cw,ch2);
+    ctx.fillStyle='#fff'; ctx.font='14px DotGothic16';
+    for(var j=0;j<choices.length;j++){
+      if(j===choiceIdx) ctx.fillText('▶',cx+10,cy+20+j*clh);
+      ctx.fillText(choices[j],cx+28,cy+20+j*clh);
+    }
+  }
+}
+
+// ===== RENDER =====
+var endingTimer=0;
+function render(){
+  ctx.fillStyle='#111'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+  if(gameState==='ENDING'){
+    endingTimer++;
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+    if(endingTimer>30){
+      var alpha=Math.min(1,(endingTimer-30)/40);
+      ctx.globalAlpha=alpha;
+      ctx.fillStyle='#222'; ctx.font='bold 52px DotGothic16';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('CLEAR',CANVAS_W/2,CANVAS_H/2-24);
+      ctx.font='15px DotGothic16'; ctx.fillStyle='#888';
+      ctx.fillText('ご来店ありがとうございました',CANVAS_W/2,CANVAS_H/2+30);
+      ctx.globalAlpha=1; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    }
+    return;
+  }
+  var cam=getCam(), map=getMap(), tx, ty;
+  for(ty=0;ty<map.length;ty++) for(tx=0;tx<map[ty].length;tx++) drawTile(tx,ty,map[ty][tx],cam.x,cam.y);
+  var allC=[], i;
+  for(i=0;i<npcs.length;i++) if(npcs[i].visible) allC.push(npcs[i]);
+  if(player.visible) allC.push({x:player.x,y:player.y,px:player.px,py:player.py,dir:player.dir,palette:playerPalette,id:'player'});
+  allC.sort(function(a,b){return a.y-b.y;});
+  for(i=0;i<allC.length;i++){
+    var c=allC[i], fr=c.id==='player'?player.animFrame:0;
+    drawChar(c.px,c.py,c.dir,fr,c.palette,cam.x,cam.y);
+  }
+  if(exclamation.show){
+    exclamation.timer++;
+    var bounce=Math.sin(exclamation.timer*0.2)*4;
+    var ex=exclamation.x*TILE+10-cam.x, ey=exclamation.y*TILE-14+bounce-cam.y;
+    ctx.fillStyle='#ffdd00'; ctx.font='bold 20px DotGothic16'; ctx.fillText('！',ex,ey+12);
+  }
+  if(gameState==='DIALOGUE'||gameState==='CHOICE'||(gameState==='CUTSCENE'&&dlgText)) drawMsgWin();
+  if(fadeAlpha>0.001||fadeDir!==0){
+    var rgb=fadeColor==='white'?'255,255,255':'0,0,0';
+    ctx.fillStyle='rgba('+rgb+','+fadeAlpha+')'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+  }
+}
+
+// ===== UPDATE =====
+function update(){
+  updateBGM();
+  if(fadeDir>0){fadeAlpha=Math.min(1,fadeAlpha+0.04);if(fadeAlpha>=1){fadeDir=0;if(fadeCb){var cb=fadeCb;fadeCb=null;cb();}}}
+  if(fadeDir<0){fadeAlpha=Math.max(0,fadeAlpha-0.04);if(fadeAlpha<=0){fadeDir=0;if(fadeCb){var cb2=fadeCb;fadeCb=null;cb2();}}}
+  actionJustPressed=keys.action&&!prevAction; prevAction=keys.action;
+  if(gameState==='EXPLORE'&&fadeDir===0){
+    updatePlayer();
+    if(actionJustPressed&&!player.moving) interact();
+  } else if(gameState==='DIALOGUE'){
+    dlgTimer++;
+    if(!dlgDone){
+      if(dlgTimer%2===0&&dlgDisplayed<dlgText.length){
+        dlgDisplayed++;
+        var cc=dlgText[dlgDisplayed-1];
+        if(cc!=='\n'&&cc!==' ') playSound('text');
+      }
+      if(dlgDisplayed>=dlgText.length) dlgDone=true;
+      if(actionJustPressed&&!dlgDone){dlgDisplayed=dlgText.length;dlgDone=true;}
+    }else if(actionJustPressed){
+      playSound('select');
+      if(dlgCallback){var cb3=dlgCallback;dlgCallback=null;cb3();}
+      else nextDialogue();
+    }
+  } else if(gameState==='CHOICE'){
+    if(keys.up&&!prevUp){choiceIdx=Math.max(0,choiceIdx-1);playSound('select');}
+    if(keys.down&&!prevDown){choiceIdx=Math.min(choices.length-1,choiceIdx+1);playSound('select');}
+    if(actionJustPressed){
+      playSound('confirm');
+      var ci=choiceIdx, cb4=dlgCallback;
+      choices=null; dlgCallback=null; dlgText=''; dlgSpeaker='';
+      gameState='EXPLORE';
+      if(cb4) cb4(ci);
+    }
+  }
+  prevUp=keys.up; prevDown=keys.down;
+}
+
+// ===== GAME LOOP =====
+function gameLoop(){ update(); render(); requestAnimationFrame(gameLoop); }
+
+// ===== INIT =====
+ctx.imageSmoothingEnabled=false;
+resetPlayer(3,17,3);
+gameLoop();
+</script>
+</body>
+</html>
